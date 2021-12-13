@@ -1,0 +1,9 @@
+(library
+ (name syntax)
+ (libraries menhirLib)
+ (preprocess
+  (pps ppx_deriving.show sedlex.ppx)))
+
+(menhir
+ (modules parser)
+ (flags --explain))
