@@ -1,0 +1,12 @@
+(executable
+ (name typer)
+ (libraries syntax)
+ (modes byte native)
+ (preprocess
+  (pps ppx_deriving.show)))
+
+(rule
+ (alias runtest)
+ (deps ./typer.bc)
+ (action
+  (run ./typer.bc)))
