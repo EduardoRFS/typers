@@ -1,0 +1,15 @@
+{
+  "name": "hmf-level-based",
+  "dependencies": {
+    "ocaml": "4.12.x",
+    "@opam/dune": "*",
+    "@opam/ppx_deriving": "*",
+    "@opam/sedlex": "*"
+  },
+  "devDependencies": {
+    "@opam/ocaml-lsp-server": "*",
+    "@opam/ocamlformat": "*",
+    "@opam/ocamlformat-rpc": "*",
+    "@opam/utop": "*"
+  }
+}
