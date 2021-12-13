@@ -94,6 +94,7 @@ end
 
 module String_set = Set.Make (String)
 module String_map = Map.Make (String)
+module Int_map = Map.Make (Int)
 module Context = struct
   type t = { level : level; expected : String_set.t }
   let empty = { level = 0; expected = String_set.empty }
@@ -192,16 +193,25 @@ let rec rename vars typ =
   match typ with
   | T_unit -> T_unit
   | T_var (variable, level, weak) -> (
-      match String_map.find_opt variable !vars with
+      let vars_map =
+        match Int_map.find_opt level !vars with
+        | Some vars_map -> vars_map
+        | None -> error Open_type
+      in
+      match String_map.find_opt variable vars_map with
       | Some ty -> ty
       | None ->
           let new_name = Unique_var.next () in
           let ty = T_var (new_name, level, weak) in
-          vars := String_map.add variable ty !vars;
+          let vars_map = String_map.add variable ty vars_map in
+          vars := Int_map.add level vars_map !vars;
           ty)
   | T_arrow (param, return) -> T_arrow (rename param, rename return)
-  | T_forall (body, level) -> T_forall (rename body, level)
-let rename typ = rename (ref String_map.empty) typ
+  | T_forall (body, level) ->
+      vars := Int_map.add level String_map.empty !vars;
+      T_forall (rename body, level)
+
+let rename typ = rename (ref Int_map.empty) typ
 let subtype ~expected ~received =
   let expected = rename expected in
   let received = rename received in
