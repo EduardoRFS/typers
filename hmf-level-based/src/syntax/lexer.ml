@@ -28,5 +28,6 @@ let provider buf () =
   let start, stop = Sedlexing.lexing_positions buf in
   (token, start, stop)
 let from_string f string =
-  from_string string |> provider
+  from_string string
+  |> provider
   |> MenhirLib.Convert.Simplified.traditional2revised f
