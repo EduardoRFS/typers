@@ -1,0 +1,13 @@
+(executable
+ (name w_subtype)
+ (libraries syntax)
+ (modes byte native)
+ (preprocess
+  (pps ppx_deriving.show)))
+
+(rule
+ (alias runtest)
+ (deps
+  (:exe ./w_subtype.exe))
+ (action
+  (run %{exe})))

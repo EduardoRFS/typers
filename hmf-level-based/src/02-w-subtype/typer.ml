@@ -109,41 +109,71 @@ let funmatch typ =
     let return = next_var () in
     ([(var_id, typ)], param, return)
 
-let rec unify ~expected ~received =
+let rec subtype qvars ~expected ~received =
   match (expected, received) with
   | T_unit, T_unit -> []
   | ( T_arrow (expected_param, expected_return),
       T_arrow (received_param, received_return) ) ->
-    let substs_param = unify ~expected:received_param ~received:expected_param in
+    let substs_param =
+      subtype qvars ~expected:received_param ~received:expected_param in
     let substs_return =
       let expected_return = subst_typ substs_param expected_return in
       let received_return = subst_typ substs_param received_return in
-      unify ~expected:expected_return ~received:received_return in
+      subtype qvars ~expected:expected_return ~received:received_return in
     substs_return @ substs_param
   | T_var expected_id, T_var received_id when expected_id = received_id -> []
-  | T_var var_id, typ
-  | typ, T_var var_id ->
-    if is_free var_id typ then
-      raise Occurs_check;
-    [(var_id, typ)]
-  | T_forall (expected_id, expected_body), T_forall (received_id, received_body)
-    ->
-    let temp_var_id = next_id () in
-    let substs =
-      let temp_var = T_var temp_var_id in
-      let expected_body = subst_typ [(expected_id, temp_var)] expected_body in
-      let received_body = subst_typ [(received_id, temp_var)] received_body in
-      unify ~expected:expected_body ~received:received_body in
-    if is_free_in_codom temp_var_id substs then
+  | T_var _, _
+  | _, T_var _ ->
+    subtype_vars qvars ~expected ~received
+  | T_forall _, _
+  | _, T_forall _ ->
+    subtype_forall qvars ~expected ~received
+  | _ -> raise Type_clash
+
+and subtype_vars qvars ~expected ~received =
+  let var_id, typ =
+    match (expected, received) with
+    | T_var expected_var_id, T_var received_var_id ->
+      if List.mem expected_var_id qvars then (
+        if List.mem received_var_id qvars then
+          raise Escape_check;
+        (received_var_id, expected))
+      else
+        (expected_var_id, received)
+    | T_var var_id, typ
+    | typ, T_var var_id ->
+      (var_id, typ)
+    | _ ->
+      (* one must be a var *)
+      assert false in
+
+  if List.mem var_id qvars then
+    raise Escape_check;
+  if is_free var_id typ then
+    raise Occurs_check;
+  [(var_id, typ)]
+
+and subtype_forall qvars ~expected ~received =
+  match (expected, received) with
+  | T_forall (expected_var_id, body), received ->
+    let qvars = expected_var_id :: qvars in
+    let substs = subtype_forall qvars ~expected:body ~received in
+    if is_free_in_codom expected_var_id substs then
       raise Escape_check;
     substs
-  | _ -> raise Type_clash
+  | expected, T_forall (received_var_id, received_body) ->
+    let substs = subtype_forall qvars ~expected ~received:received_body in
+    let substs =
+      List.filter (fun (var_id, _typ) -> var_id <> received_var_id) substs in
+    substs
+  | expected, received -> subtype qvars ~expected ~received
+let subtype ~expected ~received = subtype [] ~expected ~received
 
 let subsume ~expected ~received =
   (* TODO: this may be different from the paper *)
   let expected_vars, expected = instance expected in
   let received_vars, received = instance received in
-  let substs = unify ~expected ~received in
+  let substs = subtype ~expected ~received in
 
   (* remove received_vars *)
   let substs =
@@ -237,6 +267,4 @@ let rec infer env expr =
 
     let env = subst_env substs env in
     let typ = subst_typ substs return_typ in
-
-    (* TODO: why polymorphic check is needed? *)
     (substs, generalize env typ)

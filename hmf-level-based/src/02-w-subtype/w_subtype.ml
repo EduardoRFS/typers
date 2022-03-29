@@ -23,3 +23,14 @@ let () =
   let choose = make_choose (fun x -> fun y -> y) in
   choose id
 |}
+(*requires deep instantiation *)
+
+let () =
+  print_typ
+    {|
+let f =
+  fun (funct: (((() -> ()) -> ()) -> ()) -> ()) ->
+  fun (arg:((forall a. a -> a) -> ()) -> ()) ->
+    funct arg in
+f
+|}
