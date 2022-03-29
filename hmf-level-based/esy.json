@@ -1,8 +1,8 @@
 {
   "name": "hmf-level-based",
   "dependencies": {
-    "ocaml": "4.12.x",
-    "@opam/dune": "*",
+    "ocaml": "4.13.x",
+    "@opam/dune": "2.9.3",
     "@opam/ppx_deriving": "*",
     "@opam/sedlex": "*"
   },
