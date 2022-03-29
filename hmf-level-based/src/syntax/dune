@@ -6,4 +6,4 @@
 
 (menhir
  (modules parser)
- (flags --explain))
+ (flags --explain --external-tokens Token))

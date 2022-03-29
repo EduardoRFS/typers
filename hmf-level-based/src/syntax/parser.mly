@@ -13,92 +13,87 @@
 %token EQUAL
 %token EOF
 
+%parameter <Tree : Tree_s.S>
 %start <Tree.typ option> typ_opt
-%start <Tree.pat option> pat_opt
 %start <Tree.expr option> expr_opt
 %%
 
 let with_eof(F) ==
-  | EOF; { None }
-  | v = F; EOF; { Some v }
+  | v = option(F); EOF; { v }
 
 (* typ *)
-let typ_unit ==
-  | UNIT; { PT_unit }
-let typ_arrow ==
-  | t1 = typ_parens; ARROW; t2 = typ; { PT_arrow (t1, t2) }
-let typ_var ==
-  | i = IDENT; { PT_var i }
-let typ_forall ==
-  | FORALL; il = list(IDENT); DOT; t = typ;
-    { List.fold_left (fun t ident -> PT_forall (ident, t)) t il }
-
-let typ_terminal ==
-  | typ_var
-  | typ_unit
-let typ_parens ==
-  | typ_terminal
-  | LPARENS; t = typ; RPARENS; { t }
+let typ_opt := with_eof(typ)
 
 let typ :=
-  | typ_parens
+  | typ_atom
   | typ_arrow
   | typ_forall
 
-let typ_opt := with_eof(typ)
+let typ_atom :=
+  | typ_unit
+  | typ_var
+  | typ_parens
 
-(* pat *)
-let pat_unit ==
-  | UNIT; { PP_unit }
-let pat_ident ==
-  | i = IDENT; { PP_ident i }
-let pat_constraint ==
-  | p = pat_parens; COLON; t = typ; { PP_constraint (p, t) }
+let typ_parens :=
+  | LPARENS; typ = typ; RPARENS;
+    { typ }
 
-let pat_terminal ==
-  | pat_unit
-  | pat_ident
-let pat_parens :=
-  | pat_terminal
-  | LPARENS; p = pat; RPARENS; { p }
+let typ_unit :=
+  | UNIT;
+    { PT_unit }
 
-let pat :=
-  | pat_parens
-  | pat_constraint
+let typ_arrow :=
+  | param = typ_atom; ARROW; return = typ;
+    { PT_arrow (param, return) }
 
-let pat_opt := with_eof(pat)
+let typ_var :=
+  | var = IDENT;
+    { PT_var var }
+
+let typ_forall ==
+  | FORALL; vars = list(IDENT); DOT; typ = typ;
+    { List.fold_left (fun typ var -> PT_forall (var, typ)) typ vars }
 
 (* expr *)
 
-let expr_unit ==
-  | UNIT; { PE_unit }
-let expr_ident ==
-  | i = IDENT; { PE_ident i }
-let expr_arrow ==
-  | FUN; p = pat_parens; ARROW; e = expr; { PE_arrow (p, e) }
-let expr_apply :=
-  | e1 = expr_apply_or_parens; e2 = expr_parens; { PE_apply (e1, e2) }
-let expr_apply_or_parens ==
-  | expr_apply
-  | expr_parens
-let expr_let ==
-  | LET; p = pat; EQUAL; e1 = expr; IN; e2 = expr; { PE_let (p, e1, e2 )}
-let expr_constraint ==
-  | e = expr_parens; COLON; t = typ; { PE_constraint (e, t) }
-
-let expr_terminal ==
-  | expr_unit
-  | expr_ident
-
-let expr_parens :=
-  | expr_terminal
-  | LPARENS; p = expr; RPARENS; { p }
+let expr_opt := with_eof(expr)
 
 let expr :=
-  | expr_parens
-  | expr_constraint
-  | expr_arrow
-  | expr_apply
+  | expr_atom
   | expr_let
+  | expr_lambda
+  | expr_apply
 
-let expr_opt := with_eof(expr)
+let expr_atom :=
+  | expr_unit
+  | expr_var
+  | expr_parens
+
+let expr_parens :=
+  | LPARENS; expr = expr; RPARENS;
+    { expr }
+
+let expr_unit :=
+  | UNIT;
+    { PE_unit }
+
+let expr_var :=
+  | var = IDENT;
+    { PE_var var }
+
+let expr_let :=
+  | LET; var = IDENT; EQUAL; value = expr; IN; body = expr;
+    { PE_let (var, value, body) }
+
+let expr_lambda :=
+  | FUN; param = IDENT; ARROW; body = expr;
+    { PE_lambda (param, None, body) }
+  | FUN; LPARENS; param = IDENT; COLON; typ = typ; RPARENS; ARROW; body = expr;
+    { PE_lambda (param, Some typ, body) }
+
+let expr_apply :=
+  | funct = expr_apply_loop; arg = expr_atom;
+    { PE_apply (funct, arg) }
+let expr_apply_loop :=
+  | expr_apply
+  | expr_atom

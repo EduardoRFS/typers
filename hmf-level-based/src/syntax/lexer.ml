@@ -1,4 +1,4 @@
-open Parser
+open Token
 open Sedlexing.Utf8
 
 let rec tokenizer buf =
@@ -27,7 +27,7 @@ let provider buf () =
   let token = tokenizer buf in
   let start, stop = Sedlexing.lexing_positions buf in
   (token, start, stop)
-let from_string f string =
-  from_string string
-  |> provider
-  |> MenhirLib.Convert.Simplified.traditional2revised f
+let from_string parser string =
+  let buf = from_string string in
+  let provider = provider buf in
+  MenhirLib.Convert.Simplified.traditional2revised parser provider
