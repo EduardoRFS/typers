@@ -53,10 +53,9 @@ module Utils = struct
           let vars = loop param in
           vars @ loop return
         | T_forall (_forall, body) -> loop body
-        | T_var { contents = Unbound _ } -> []
-        | T_var ({ contents = Bound forall' } as var) ->
-          if forall == forall' then
-            let name = var_name context var in
+        | T_var var ->
+          if var.forall == forall then
+            let name = var_name context typ in
             [name]
           else
             [] in
@@ -66,19 +65,20 @@ module Utils = struct
       | vars ->
         let vars = String.concat " " vars in
         printf "forall %s. %a" vars pp_typ body)
-    | T_var ({ contents = Unbound _ } as var) ->
-      printf "_%s" (var_name context var)
-    | T_var ({ contents = Bound _ } as var) ->
-      printf "%s" (var_name context var)
+    | T_var { forall } ->
+      if is_generic forall then
+        printf "%s" (var_name context typ)
+      else
+        printf "_%s" (var_name context typ)
   let pp_typ fmt typ = pp_typ (ref 0, ref []) fmt typ
 end
 
 let print_typ code =
   let expr = expr_from_string code |> Option.get in
-  enter_level ();
+  enter_forall ();
   let typ = infer [] expr in
-  leave_level ();
-  let typ = generalize typ in
+  let forall = leave_forall () in
+  let typ = generalize forall typ in
   Format.printf "%a\n%!" Utils.pp_typ typ
 
 let () =
@@ -93,19 +93,29 @@ let () =
 let () =
   print_typ
     {|
-         let id = fun x -> x in
-         let make_choose = fun (choose: forall a. a -> a -> a) -> choose in
-         let choose = make_choose (fun x -> fun y -> y) in
-         choose id
-       |}
+      let id = fun x -> x in
+      let make_choose = fun (choose: forall a. a -> a -> a) -> choose in
+      let choose = make_choose (fun x -> fun y -> y) in
+      choose id
+    |}
 (*requires deep instantiation *)
 
 let () =
   print_typ
     {|
-         let f =
-           fun (funct: (((() -> ()) -> ()) -> ()) -> ()) ->
-           fun (arg:((forall a. a -> a) -> ()) -> ()) ->
-             funct arg in
-         f
-      |}
+      let f =
+        fun (funct: (((() -> ()) -> ()) -> ()) -> ()) ->
+        fun (arg:((forall a. a -> a) -> ()) -> ()) ->
+          funct arg in
+      f
+    |}
+
+let () =
+  print_typ
+    {|
+      let f =
+        fun (funct: (forall a. (forall b. b -> b) -> a -> a) -> ()) ->
+        fun arg ->
+          funct arg in
+      f
+    |}
