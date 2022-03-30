@@ -107,8 +107,13 @@ let funmatch typ =
   | T_var var_id ->
     let param = next_var () in
     let return = next_var () in
+    let typ = T_arrow (param, return) in
     ([(var_id, typ)], param, return)
 
+(* prevents binding quantified variables through qvars and
+   then ensure quantified variables are not present on the substitution,
+   this ensures that quantified variables cannot "move" and allows to
+   automatically instantiation of received polymorphic values *)
 let rec subtype qvars ~expected ~received =
   match (expected, received) with
   | T_unit, T_unit -> []
@@ -136,6 +141,7 @@ and subtype_vars qvars ~expected ~received =
     | T_var expected_var_id, T_var received_var_id ->
       if List.mem expected_var_id qvars then (
         if List.mem received_var_id qvars then
+          (* TODO: technically this is not an escape_check *)
           raise Escape_check;
         (received_var_id, expected))
       else
@@ -147,8 +153,6 @@ and subtype_vars qvars ~expected ~received =
       (* one must be a var *)
       assert false in
 
-  if List.mem var_id qvars then
-    raise Escape_check;
   if is_free var_id typ then
     raise Occurs_check;
   [(var_id, typ)]

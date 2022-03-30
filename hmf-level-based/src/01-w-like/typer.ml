@@ -21,7 +21,6 @@ exception Occurs_check
 exception Escape_check
 exception Type_clash
 
-(* de-bruijn *)
 type id = int
 and typ =
   | T_unit
@@ -107,6 +106,7 @@ let funmatch typ =
   | T_var var_id ->
     let param = next_var () in
     let return = next_var () in
+    let typ = T_arrow (param, return) in
     ([(var_id, typ)], param, return)
 
 let rec unify ~expected ~received =
