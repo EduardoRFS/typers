@@ -1,0 +1,13 @@
+(executable
+ (name w_forall)
+ (libraries syntax)
+ (modes byte native)
+ (preprocess
+  (pps ppx_deriving.show)))
+
+(rule
+ (alias runtest)
+ (deps
+  (:exe ./w_forall.exe))
+ (action
+  (run %{exe})))
