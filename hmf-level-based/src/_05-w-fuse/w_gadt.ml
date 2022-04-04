@@ -1,6 +1,8 @@
 open Typer
 open Syntax.Make (Tree)
 
+let () = Printexc.record_backtrace true
+
 module Utils = struct
   let rec to_string acc int =
     let diff = int mod 26 in
@@ -29,56 +31,59 @@ module Utils = struct
   let rec pp_typ context fmt typ =
     let pp_typ fmt typ = pp_typ context fmt typ in
     let printf s = Format.fprintf fmt s in
+    let typ = repr typ in
+
+    (if has_forall typ then
+       let forall = level_ref typ.forall in
+       let rec loop typ =
+         let typ = repr typ in
+         match typ.desc with
+         | T_unit -> []
+         | T_arrow (param, return) ->
+           (* OCaml arg eval order is right-to-left *)
+           let vars = loop param in
+           vars @ loop return
+         | T_var ->
+           if level_ref typ.forall == forall then
+             let name = var_name context typ in
+             [name]
+           else
+             []
+         | T_link _ -> assert false in
+       let vars = List.sort_uniq String.compare (loop typ) in
+       match vars with
+       | [] -> ()
+       | vars ->
+         let vars = String.concat " " vars in
+         printf "forall %s. " vars);
 
     match typ.desc with
-    | T_link typ -> pp_typ fmt typ
     | T_unit -> printf "()"
     | T_arrow (param, return) ->
-      let rec loop param =
+      let param = repr param in
+      let is_arrow =
         match param.desc with
-        | T_link typ -> loop typ
-        | T_arrow _
-        | T_forall _ ->
-          printf "(%a)" pp_typ param
-        | _ -> printf "%a" pp_typ param in
-      loop param;
-      printf " -> %a" pp_typ return
-    | T_forall (forall, body) -> (
-      let rec loop typ =
-        match typ.desc with
-        | T_link typ -> loop typ
-        | T_unit -> []
-        | T_arrow (param, return) ->
-          (* OCaml arg eval order is right-to-left *)
-          let vars = loop param in
-          vars @ loop return
-        | T_forall (_forall, body) -> loop body
-        | T_var var ->
-          if var.forall == forall then
-            let name = var_name context typ in
-            [name]
-          else
-            [] in
-      let vars = List.sort_uniq String.compare (loop body) in
-      match vars with
-      | [] -> pp_typ fmt body
-      | vars ->
-        let vars = String.concat " " vars in
-        printf "forall %s. %a" vars pp_typ body)
-    | T_var { forall } ->
-      if is_generic forall then
+        | T_arrow _ -> true
+        | _ -> false in
+      if is_arrow || has_forall param then
+        printf "(%a) -> %a" pp_typ param pp_typ return
+      else
+        printf "%a -> %a" pp_typ param pp_typ return
+    | T_var ->
+      if is_generic typ.forall then
         printf "%s" (var_name context typ)
       else
         printf "_%s" (var_name context typ)
+    | T_link _ -> assert false
   let pp_typ fmt typ = pp_typ (ref 0, ref []) fmt typ
 end
 
 let print_typ code =
   let expr = expr_from_string code |> Option.get in
-  enter_forall ();
-  let typ = infer [] expr in
-  let forall = leave_forall () in
-  let typ = generalize forall typ in
+  let typ =
+    with_forall @@ fun () ->
+    let typ = infer [] expr in
+    instance typ in
   Format.printf "%a\n%!" Utils.pp_typ typ
 
 let () =
@@ -89,7 +94,7 @@ let () =
       let call_id = fun (id: forall a. a -> a) ->
         sequence (id ()) id in
       call_id id
-   |}
+    |}
 let () =
   print_typ
     {|

@@ -1,0 +1,320 @@
+module Unique_ident : sig
+  type t [@@deriving ord, show]
+
+  val initial : t
+  val next : t -> t
+
+  val to_ident : t -> string
+end = struct
+  type t = int [@@deriving ord, show]
+
+  let initial = 0
+  let next t = t + 1
+
+  (* TODO: I really don't like this function, but it works *)
+  let rec to_ident acc int =
+    let diff = int mod 26 in
+    let char = Char.chr (97 + diff) in
+    let acc = char :: acc in
+    let next = int / 26 in
+    if next > 0 then
+      to_ident acc (next - 1)
+    else
+      String.of_seq (List.to_seq acc)
+  let to_ident int = to_ident [] int
+end
+
+open Syntax
+
+module String_set = Set.Make (String)
+type context = {
+  next_ident : Unique_ident.t;
+  unbounded : String_set.t;
+}
+
+let empty_context =
+  { next_ident = Unique_ident.initial; unbounded = String_set.empty }
+let is_unbounded var context = String_set.mem var context.unbounded
+
+let random_var context =
+  let { next_ident; unbounded } = context in
+  let ident = next_ident in
+  let next_ident = Unique_ident.next next_ident in
+  (Unique_ident.to_ident ident, { next_ident; unbounded })
+let new_var context =
+  let { next_ident; unbounded } = context in
+  let ident = next_ident in
+  let next_ident = Unique_ident.next next_ident in
+
+  let ident = Unique_ident.to_ident ident in
+  let unbounded = String_set.add ident unbounded in
+  (ident, { next_ident; unbounded })
+
+let unbounded_vars context = context.unbounded
+let bound_var var context =
+  let { next_ident; unbounded } = context in
+  let unbounded = String_set.remove var unbounded in
+  { next_ident; unbounded }
+
+type 'a seed_ty =
+  | Unit : unit seed_ty
+  | New_var : ident seed_ty
+type seed = Seed : ('a -> Syntax.typ) * 'a seed_ty -> seed
+
+type 'a constructor_ty =
+  | Base_type : Syntax.typ constructor_ty
+  | Additional_type : Syntax.typ constructor_ty
+  | Random_var : ident constructor_ty
+  | Bound_var : ident constructor_ty
+type 'a constructor_args =
+  | Call : 'a constructor_ty -> ('a -> Syntax.typ) constructor_args
+  | Cons :
+      'a constructor_ty * 'b constructor_args
+      -> ('a -> 'b) constructor_args
+type constructor = Constructor : ('a * 'a constructor_args) -> constructor
+
+let seeds =
+  let unit =
+    let unit () = PT_unit in
+    Seed (unit, Unit) in
+  let var =
+    let var name = PT_var name in
+    Seed (var, New_var) in
+  [unit; var]
+let constructors =
+  let arrow param return = PT_arrow (param, return) in
+  let param_arrow =
+    Constructor (arrow, Cons (Base_type, Call Additional_type)) in
+  let return_arrow =
+    Constructor (arrow, Cons (Additional_type, Call Base_type)) in
+
+  let forall name body = PT_forall (name, body) in
+  (* TODO: short circuit on this *)
+  let new_forall = Constructor (forall, Cons (Random_var, Call Base_type)) in
+  let bound_forall = Constructor (forall, Cons (Bound_var, Call Base_type)) in
+
+  [param_arrow; return_arrow; new_forall; bound_forall]
+
+let make_seed context seed =
+  let (Seed (make, ty)) = seed in
+  match ty with
+  | Unit -> (make (), context)
+  | New_var ->
+    let var, context = new_var context in
+    (make var, context)
+let seed context = List.map (fun seed -> make_seed context seed) seeds
+
+let make_constructor =
+  let find_args (type a) context (base_typ : Syntax.typ)
+      (arg_ty : a constructor_ty) : (a * context) list =
+    match arg_ty with
+    | Base_type -> [(base_typ, context)]
+    | Additional_type -> seed context
+    | Bound_var ->
+      let vars = unbounded_vars context in
+      String_set.fold
+        (fun var cases ->
+          let context = bound_var var context in
+          (var, context) :: cases)
+        vars []
+    | Random_var ->
+      let var, context = random_var context in
+      [(var, context)] in
+  let call_step context base_typ make arg_ty =
+    let args = find_args context base_typ arg_ty in
+    List.map (fun (arg, context) -> (make arg, context)) args in
+  let rec call : type a. _ -> _ -> a -> a constructor_args -> _ =
+   fun context base_typ make args_ty ->
+    match args_ty with
+    | Call arg_ty -> call_step context base_typ make arg_ty
+    | Cons (arg_ty, args_ty) ->
+      let cases = call_step context base_typ make arg_ty in
+      List.concat_map
+        (fun (make, context) -> call context base_typ make args_ty)
+        cases in
+  fun context base_typ constructor ->
+    let (Constructor (make, args_ty)) = constructor in
+    call context base_typ make args_ty
+let constructor context base_typ =
+  List.concat_map
+    (fun constructor -> make_constructor context base_typ constructor)
+    constructors
+
+let test_against_types ~depth f =
+  let context = empty_context in
+  if depth <= 0 then raise (Invalid_argument "depth must be >= 1");
+
+  let rec loop ~depth context case =
+    if depth <= 0 then
+      ()
+    else
+      let () = f context case in
+
+      let depth = depth - 1 in
+      let cases = constructor context case in
+      List.iter (fun (case, context) -> loop ~depth context case) cases in
+
+  let cases = seed context in
+  List.iter (fun (case, context) -> loop ~depth context case) cases
+(* TODO: maybe test the test suite*)
+
+let equal : typ -> typ -> bool = assert false
+
+type result =
+  | Equal
+  | Not_equal
+
+let arrow a b = PT_arrow (a, b)
+let forall name body = PT_forall (name, body)
+
+type typ_relation =
+  | Subtype_covariant
+  | Subtype_contravariant
+  | Identical
+  | Incompatible
+
+type test = {
+  expected_relation : typ_relation;
+  expected : typ;
+  received : typ;
+}
+let test relation ~expected ~received =
+  { expected_relation = relation; expected; received }
+
+let arrow_param relation ~expected ~received return =
+  let relation =
+    match relation with
+    | Subtype_covariant -> Subtype_contravariant
+    | Subtype_contravariant -> Subtype_covariant
+    | Identical -> Identical
+    | Incompatible -> Incompatible in
+  let expected = arrow expected return in
+  let received = arrow received return in
+  [test relation ~expected ~received]
+
+let arrow_return relation ~expected ~received param =
+  let expected = arrow param expected in
+  let received = arrow param received in
+  [test relation ~expected ~received]
+
+(*
+
+forall a. forall b. a -> b -> b
+forall a. a -> forall b. b -> b
+
+          b -> b
+forall b. b -> b
+
+*)
+let new_forall relation ~expected ~received unused_var =
+  let forall typ = forall unused_var typ in
+  [
+    test relation ~expected:(forall expected) ~received;
+    test relation ~expected ~received:(forall expected);
+    test relation ~expected:(forall expected) ~received:(forall expected);
+  ]
+
+(* let expected_bound_forall relation ~expected ~received expected_var = *)
+
+(* TODO: short circuit on this *)
+let new_forall = Constructor (forall, Cons (Random_var, Call Base_type))
+let bound_forall = Constructor (forall, Cons (Bound_var, Call Base_type))
+
+let case ~expected ~received result = ()
+
+(* let case a b  *)
+(*
+A <: B && B <: A
+----------------------
+A = B
+
+A <: B && not (B <: A)
+----------------------
+A <> B
+
+
+A <: B
+----------------------
+X -> A <: X -> B
+
+A <: B && A <> B
+----------------------
+not (X -> B <: X -> A)
+
+not (A <: B)
+----------------------
+not (X -> A <: X -> B)
+
+A <: B
+----------------------
+B -> X <: A -> X
+
+
+A <: B && A <> B
+----------------------
+not (A -> X <: B -> X)
+
+not (A <: B)
+----------------------
+not (B -> X <: A -> X)
+
+(a `free `X)
+----------------------
+Y -> forall a. X <: Y -> forall a. X
+
+(a `free `X)
+----------------------
+not (forall a. Y -> X <: Y -> forall a. X)
+*)
+
+open Types
+let rec repr typ =
+  match typ.desc with
+  | T_link t ->
+    let t = repr t in
+    typ.desc <- T_link t;
+    t
+  | _ -> typ
+
+(* typ in normal form *)
+let level_ref typ = typ.forall
+(* match typ.forall with
+   | Forall level_ref
+   | Forall_var level_ref ->
+     level_ref *)
+
+(* typ in normal form *)
+let level typ = !(level_ref typ)
+
+(* typ in normal form *)
+let is_generic typ = Level.is_generic (level typ)
+
+exception Not_normal_form
+let rec assert_normal_form forall typ =
+  let typ = repr typ in
+  if is_generic typ && not (typ.forall == forall) then raise Not_normal_form;
+  match typ.desc with
+  | T_unit -> ()
+  | T_var -> ()
+  | T_arrow (param, return) ->
+    assert_normal_form forall param;
+    assert_normal_form forall return
+  | T_link _ -> assert false
+let assert_normal_form typ =
+  let typ = repr typ in
+  assert_normal_form typ.forall typ
+
+(* TODO: optimize this, generating more than 8 is too slow *)
+let depth = 7
+
+let () =
+  test_against_types ~depth (fun context typ ->
+      try
+        let typ = Translate_typ.translate_typ typ in
+        assert_normal_form typ
+      with
+      | Translate_typ.Unbound_type_variable name as exn ->
+        if is_unbounded name context then () else raise exn)
+
+type 'a ty
+module Unit = struct end

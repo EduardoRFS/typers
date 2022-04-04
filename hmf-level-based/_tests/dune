@@ -1,13 +1,12 @@
 (executable
- (name w_gadt)
+ (name tests)
  (libraries syntax)
- (modes byte native)
  (preprocess
-  (pps ppx_deriving.show)))
+  (pps ppx_deriving.ord ppx_deriving.show)))
 
 (rule
  (alias runtest)
  (deps
-  (:exe ./w_gadt.exe))
+  (:exe ./tests.exe))
  (action
   (run %{exe})))
