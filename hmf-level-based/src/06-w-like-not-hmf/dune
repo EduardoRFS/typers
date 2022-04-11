@@ -1,0 +1,13 @@
+(executable
+ (name w_like)
+ (libraries syntax)
+ (modes byte native)
+ (preprocess
+  (pps ppx_deriving.show)))
+
+(rule
+ (alias runtest)
+ (deps
+  (:exe ./w_like.exe))
+ (action
+  (run %{exe})))
